@@ -4,7 +4,21 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type LetterStatus = 'correct' | 'present' | 'absent';
+type KeyboardLetterStatus = LetterStatus | 'unused';
 type GameStatus = 'loading' | 'ready' | 'won' | 'lost' | 'error';
+
+const keyStatusPriority: Record<LetterStatus, number> = {
+  absent: 1,
+  present: 2,
+  correct: 3,
+};
+
+const keyboardStatusPriority: Record<KeyboardLetterStatus, number> = {
+  unused: 0,
+  absent: 1,
+  present: 2,
+  correct: 3,
+};
 
 const keyboardRows = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
 const specialKeys = ['ENTER', 'DEL'];
@@ -31,9 +45,9 @@ export default function Home() {
   );
   const [currentRowIndex, setCurrentRowIndex] = useState(0);
   const [currentGuess, setCurrentGuess] = useState('');
-  const [letterStatuses, setLetterStatuses] = useState<Record<string, LetterStatus>>({});
+  const [keyStatuses, setKeyStatuses] = useState<Record<string, LetterStatus>>({});
   const [targetWord, setTargetWord] = useState('');
-  const [gameStatus, setGameStatus] = useState<GameStatus>('loading');
+  const [gameStatus, setGameStatus] = useState<GameStatus>('ready');
   const [errorMessage, setErrorMessage] = useState('');
   const didSendHistoryRef = useRef(false);
 
@@ -58,7 +72,6 @@ export default function Home() {
         }
 
         setTargetWord(data.word.toLowerCase());
-        setGameStatus('ready');
       } catch {
         setErrorMessage('Failed to load target word. Please refresh the page.');
         setGameStatus('error');
@@ -118,18 +131,19 @@ export default function Home() {
     });
   }, []);
 
-  const mergeLetterStatus = useCallback((letter: string, nextStatus: LetterStatus) => {
-    setLetterStatuses((previous) => {
+  const updateKeyStatus = useCallback((letter: string, nextStatus: LetterStatus) => {
+    setKeyStatuses((previous) => {
       const currentStatus = previous[letter];
 
-      if (!currentStatus || statusPriority[nextStatus] > statusPriority[currentStatus]) {
-        return {
-          ...previous,
-          [letter]: nextStatus,
-        };
+      // CRITICAL: Never downgrade a letter's status. correct > present > absent
+      if (currentStatus && keyStatusPriority[nextStatus] <= keyStatusPriority[currentStatus]) {
+        return previous;
       }
 
-      return previous;
+      return {
+        ...previous,
+        [letter]: nextStatus,
+      };
     });
   }, []);
 
@@ -176,8 +190,10 @@ export default function Home() {
       return next;
     });
 
+    // Update keyboard colors - synchronize with grid evaluation
     for (let index = 0; index < wordLength; index += 1) {
-      mergeLetterStatus(guess[index], nextCellStatuses[index] ?? 'absent');
+      const letterStatus = nextCellStatuses[index] ?? 'absent';
+      updateKeyStatus(guess[index], letterStatus);
     }
 
     if (guess === target) {
@@ -192,7 +208,7 @@ export default function Home() {
 
     setCurrentRowIndex((previous) => previous + 1);
     setCurrentGuess('');
-  }, [currentGuess, currentRowIndex, gameStatus, mergeLetterStatus, targetWord]);
+  }, [currentGuess, currentRowIndex, gameStatus, updateKeyStatus, targetWord]);
 
   const handleInput = useCallback(
     (key: string) => {
@@ -249,29 +265,30 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleKeyboard);
   }, [handleInput]);
 
-  const getKeyClassName = (key: string) => {
-    const status = letterStatuses[key];
-
+  const getKeyClassName = (status: LetterStatus | undefined, key: string) => {
     const baseClassName =
-      'flex h-14 min-w-[2.25rem] items-center justify-center rounded-md px-2 text-sm font-semibold uppercase tracking-wide transition-colors';
-
-    if (key === 'ENTER' || key === 'DEL') {
-      return `${baseClassName} min-w-[4.5rem] bg-zinc-200 text-zinc-700 hover:bg-zinc-300`;
-    }
+      'flex h-12 min-w-[2.5rem] items-center justify-center rounded-lg px-2 py-1 text-xs font-bold uppercase transition-all active:scale-95';
 
     if (status === 'correct') {
-      return `${baseClassName} bg-emerald-600 text-white`;
+      return `${baseClassName} bg-green-600 text-white shadow-md hover:shadow-lg`;
     }
 
     if (status === 'present') {
-      return `${baseClassName} bg-amber-500 text-white`;
+      return `${baseClassName} bg-yellow-500 text-white shadow-md hover:shadow-lg`;
     }
 
     if (status === 'absent') {
-      return `${baseClassName} bg-zinc-500 text-white`;
+      return `${baseClassName} bg-gray-500 text-white shadow-md hover:shadow-lg`;
     }
 
-    return `${baseClassName} bg-zinc-200 text-zinc-800 hover:bg-zinc-300`;
+    // Default state for unused letters
+    return `${baseClassName} bg-gray-200 text-black hover:bg-gray-300 shadow-sm`;
+  };
+
+  const getSpecialKeyClassName = () => {
+    const baseClassName =
+      'flex h-12 min-w-16 items-center justify-center rounded-lg px-2 py-1 text-xs font-bold uppercase transition-all active:scale-95';
+    return `${baseClassName} bg-gray-200 text-black hover:bg-gray-300 shadow-sm`;
   };
 
   return (
@@ -292,8 +309,8 @@ export default function Home() {
               Guess length {currentGuess.length}/5
             </span>
             <span className="rounded-full border border-zinc-300 bg-white/70 px-3 py-1 shadow-sm">
-              {gameStatus === 'loading' && 'Loading word...'}
-              {gameStatus === 'ready' && 'Ready to play'}
+              {!targetWord && 'Loading word...'}
+              {targetWord && gameStatus === 'ready' && 'Ready to play'}
               {gameStatus === 'won' && 'Solved!'}
               {gameStatus === 'lost' && 'Game over'}
               {gameStatus === 'error' && 'Error'}
@@ -320,37 +337,15 @@ export default function Home() {
                 currentRowIndex={currentRowIndex}
               />
 
-              <div className="mt-8 flex flex-col gap-3">
-                {keyboardRows.map((row) => (
-                  <div key={row} className="flex justify-center gap-2">
-                    {row.split('').map((key) => (
-                      <button
-                        key={key}
-                        type="button"
-                        className={getKeyClassName(key)}
-                        onClick={() => handleInput(key)}
-                        disabled={isInputLocked}
-                      >
-                        {key}
-                      </button>
-                    ))}
-                  </div>
-                ))}
-
-                <div className="flex justify-center gap-2">
-                  {specialKeys.map((key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      className={getKeyClassName(key)}
-                      onClick={() => handleInput(key)}
-                      disabled={isInputLocked}
-                    >
-                      {key}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <WordleKeyboard
+                keyboardRows={keyboardRows}
+                specialKeys={specialKeys}
+                keyStatuses={keyStatuses}
+                onKeyPress={handleInput}
+                getKeyClassName={getKeyClassName}
+                getSpecialKeyClassName={getSpecialKeyClassName}
+                disabled={isInputLocked}
+              />
 
               {gameStatus === 'won' || gameStatus === 'lost' ? (
                 <GameOverModal
@@ -406,6 +401,62 @@ function WordleGrid({
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+function WordleKeyboard({
+  keyboardRows,
+  specialKeys,
+  keyStatuses,
+  onKeyPress,
+  getKeyClassName,
+  getSpecialKeyClassName,
+  disabled,
+}: {
+  keyboardRows: string[];
+  specialKeys: string[];
+  keyStatuses: Record<string, LetterStatus>;
+  onKeyPress: (key: string) => void;
+  getKeyClassName: (status: LetterStatus | undefined, key: string) => string;
+  getSpecialKeyClassName: () => string;
+  disabled: boolean;
+}) {
+  return (
+    <div className="mt-8 flex flex-col gap-3">
+      {keyboardRows.map((row) => (
+        <div key={row} className="flex justify-center gap-2">
+          {row.split('').map((key) => {
+            const status = keyStatuses[key];
+
+            return (
+              <button
+                key={key}
+                type="button"
+                className={getKeyClassName(status, key)}
+                onClick={() => onKeyPress(key)}
+                {...(disabled && { disabled: true })}
+              >
+                {key}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+
+      <div className="flex justify-center gap-2">
+        {specialKeys.map((key) => (
+          <button
+            key={key}
+            type="button"
+            className={getSpecialKeyClassName()}
+            onClick={() => onKeyPress(key)}
+            {...(disabled && { disabled: true })}
+          >
+            {key}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
