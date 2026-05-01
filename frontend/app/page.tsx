@@ -1,21 +1,210 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 type LetterStatus = 'correct' | 'present' | 'absent';
+type GameStatus = 'loading' | 'ready' | 'won' | 'lost' | 'error';
 
 const keyboardRows = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
-
 const specialKeys = ['ENTER', 'DEL'];
 
+const boardSize = 6;
+const wordLength = 5;
+
+const statusPriority: Record<LetterStatus, number> = {
+  absent: 1,
+  present: 2,
+  correct: 3,
+};
+
 const createEmptyBoard = () =>
-  Array.from({ length: 6 }, () => Array.from({ length: 5 }, () => ''));
+  Array.from({ length: boardSize }, () => Array.from({ length: wordLength }, () => ''));
+
+const createEmptyCellStatuses = () =>
+  Array.from({ length: boardSize }, () => Array.from({ length: wordLength }, () => null));
 
 export default function Home() {
-  const [boardState, _setBoardState] = useState<string[][]>(createEmptyBoard());
-  const [currentRowIndex, _setCurrentRowIndex] = useState(0);
-  const [currentGuess, _setCurrentGuess] = useState('');
-  const [letterStatuses, _setLetterStatuses] = useState<Record<string, LetterStatus>>({});
+  const [boardState, setBoardState] = useState<string[][]>(createEmptyBoard());
+  const [cellStatuses, setCellStatuses] = useState<(LetterStatus | null)[][]>(
+    createEmptyCellStatuses()
+  );
+  const [currentRowIndex, setCurrentRowIndex] = useState(0);
+  const [currentGuess, setCurrentGuess] = useState('');
+  const [letterStatuses, setLetterStatuses] = useState<Record<string, LetterStatus>>({});
+  const [targetWord, setTargetWord] = useState('');
+  const [gameStatus, setGameStatus] = useState<GameStatus>('loading');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    const loadTargetWord = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+        if (!apiUrl) {
+          throw new Error('API URL is not configured');
+        }
+
+        const response = await fetch(`${apiUrl}/api/word/random`);
+        const data = (await response.json()) as {
+          success?: boolean;
+          word?: string;
+          message?: string;
+        };
+
+        if (!response.ok || !data.success || !data.word) {
+          throw new Error(data.message || 'Failed to load target word');
+        }
+
+        setTargetWord(data.word.toLowerCase());
+        setGameStatus('ready');
+      } catch {
+        setErrorMessage('Failed to load target word. Please refresh the page.');
+        setGameStatus('error');
+      }
+    };
+
+    loadTargetWord();
+  }, []);
+
+  const updateBoardRow = useCallback((rowIndex: number, guess: string) => {
+    setBoardState((previous) => {
+      const next = previous.map((row) => [...row]);
+      const nextRow = Array.from({ length: wordLength }, (_, columnIndex) => guess[columnIndex] ?? '');
+      next[rowIndex] = nextRow;
+      return next;
+    });
+  }, []);
+
+  const mergeLetterStatus = useCallback((letter: string, nextStatus: LetterStatus) => {
+    setLetterStatuses((previous) => {
+      const currentStatus = previous[letter];
+
+      if (!currentStatus || statusPriority[nextStatus] > statusPriority[currentStatus]) {
+        return {
+          ...previous,
+          [letter]: nextStatus,
+        };
+      }
+
+      return previous;
+    });
+  }, []);
+
+  const submitGuess = useCallback(() => {
+    if (gameStatus !== 'ready' || targetWord.length !== wordLength || currentGuess.length !== wordLength) {
+      return;
+    }
+
+    const guess = currentGuess.toLowerCase();
+    const target = targetWord.toLowerCase();
+    const nextCellStatuses = Array.from({ length: wordLength }, () => null as LetterStatus | null);
+    const targetLetterCounts = new Map<string, number>();
+
+    for (const letter of target) {
+      targetLetterCounts.set(letter, (targetLetterCounts.get(letter) ?? 0) + 1);
+    }
+
+    for (let index = 0; index < wordLength; index += 1) {
+      if (guess[index] === target[index]) {
+        nextCellStatuses[index] = 'correct';
+        targetLetterCounts.set(guess[index], (targetLetterCounts.get(guess[index]) ?? 0) - 1);
+      }
+    }
+
+    for (let index = 0; index < wordLength; index += 1) {
+      if (nextCellStatuses[index]) {
+        continue;
+      }
+
+      const currentLetter = guess[index];
+      const remainingCount = targetLetterCounts.get(currentLetter) ?? 0;
+
+      if (remainingCount > 0) {
+        nextCellStatuses[index] = 'present';
+        targetLetterCounts.set(currentLetter, remainingCount - 1);
+      } else {
+        nextCellStatuses[index] = 'absent';
+      }
+    }
+
+    setCellStatuses((previous) => {
+      const next = previous.map((row) => [...row]);
+      next[currentRowIndex] = nextCellStatuses;
+      return next;
+    });
+
+    for (let index = 0; index < wordLength; index += 1) {
+      mergeLetterStatus(guess[index], nextCellStatuses[index] ?? 'absent');
+    }
+
+    if (guess === target) {
+      setGameStatus('won');
+      return;
+    }
+
+    if (currentRowIndex === boardSize - 1) {
+      setGameStatus('lost');
+      return;
+    }
+
+    setCurrentRowIndex((previous) => previous + 1);
+    setCurrentGuess('');
+  }, [currentGuess, currentRowIndex, gameStatus, mergeLetterStatus, targetWord]);
+
+  const handleInput = useCallback(
+    (key: string) => {
+      if (gameStatus !== 'ready') {
+        return;
+      }
+
+      if (/^[A-Z]$/.test(key)) {
+        if (currentGuess.length >= wordLength) {
+          return;
+        }
+
+        const nextGuess = `${currentGuess}${key.toLowerCase()}`;
+        setCurrentGuess(nextGuess);
+        updateBoardRow(currentRowIndex, nextGuess);
+        return;
+      }
+
+      if (key === 'DEL') {
+        const nextGuess = currentGuess.slice(0, -1);
+        setCurrentGuess(nextGuess);
+        updateBoardRow(currentRowIndex, nextGuess);
+        return;
+      }
+
+      if (key === 'ENTER') {
+        submitGuess();
+      }
+    },
+    [currentGuess, currentRowIndex, gameStatus, submitGuess, updateBoardRow]
+  );
+
+  useEffect(() => {
+    const handleKeyboard = (event: KeyboardEvent) => {
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        handleInput('DEL');
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        handleInput('ENTER');
+        return;
+      }
+
+      if (/^[a-zA-Z]$/.test(event.key)) {
+        handleInput(event.key.toUpperCase());
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyboard);
+
+    return () => window.removeEventListener('keydown', handleKeyboard);
+  }, [handleInput]);
 
   const getKeyClassName = (key: string) => {
     const status = letterStatuses[key];
@@ -59,31 +248,60 @@ export default function Home() {
             <span className="rounded-full border border-zinc-300 bg-white/70 px-3 py-1 shadow-sm">
               Guess length {currentGuess.length}/5
             </span>
+            <span className="rounded-full border border-zinc-300 bg-white/70 px-3 py-1 shadow-sm">
+              {gameStatus === 'loading' && 'Loading word...'}
+              {gameStatus === 'ready' && 'Ready to play'}
+              {gameStatus === 'won' && 'Solved!'}
+              {gameStatus === 'lost' && 'Game over'}
+              {gameStatus === 'error' && 'Error'}
+            </span>
           </div>
         </header>
 
         <section className="w-full max-w-lg rounded-3xl border border-zinc-300 bg-white/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.12)] backdrop-blur-sm sm:p-8">
-          <WordleGrid boardState={boardState} currentRowIndex={currentRowIndex} />
-
-          <div className="mt-8 flex flex-col gap-3">
-            {keyboardRows.map((row) => (
-              <div key={row} className="flex justify-center gap-2">
-                {row.split('').map((key) => (
-                  <button key={key} type="button" className={getKeyClassName(key)}>
-                    {key}
-                  </button>
-                ))}
-              </div>
-            ))}
-
-            <div className="flex justify-center gap-2">
-              {specialKeys.map((key) => (
-                <button key={key} type="button" className={getKeyClassName(key)}>
-                  {key}
-                </button>
-              ))}
+          {errorMessage ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-center text-sm font-medium text-rose-700">
+              {errorMessage}
             </div>
-          </div>
+          ) : (
+            <>
+              <WordleGrid
+                boardState={boardState}
+                cellStatuses={cellStatuses}
+                currentRowIndex={currentRowIndex}
+              />
+
+              <div className="mt-8 flex flex-col gap-3">
+                {keyboardRows.map((row) => (
+                  <div key={row} className="flex justify-center gap-2">
+                    {row.split('').map((key) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={getKeyClassName(key)}
+                        onClick={() => handleInput(key)}
+                      >
+                        {key}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+
+                <div className="flex justify-center gap-2">
+                  {specialKeys.map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      className={getKeyClassName(key)}
+                      onClick={() => handleInput(key)}
+                    >
+                      {key}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </section>
       </div>
     </main>
@@ -92,9 +310,11 @@ export default function Home() {
 
 function WordleGrid({
   boardState,
+  cellStatuses,
   currentRowIndex,
 }: {
   boardState: string[][];
+  cellStatuses: (LetterStatus | null)[][];
   currentRowIndex: number;
 }) {
   return (
@@ -103,13 +323,23 @@ function WordleGrid({
         <div key={rowIndex} className="grid grid-cols-5 gap-3">
           {row.map((letter, columnIndex) => {
             const isCurrentRow = rowIndex === currentRowIndex;
+            const status = cellStatuses[rowIndex][columnIndex];
+
+            const statusClassName =
+              status === 'correct'
+                ? 'border-emerald-600 bg-emerald-600 text-white'
+                : status === 'present'
+                  ? 'border-amber-500 bg-amber-500 text-white'
+                  : status === 'absent'
+                    ? 'border-zinc-500 bg-zinc-500 text-white'
+                    : isCurrentRow
+                      ? 'border-zinc-400 bg-white'
+                      : 'border-zinc-200 bg-zinc-50';
 
             return (
               <div
                 key={`${rowIndex}-${columnIndex}`}
-                className={`flex aspect-square items-center justify-center rounded-2xl border-2 text-2xl font-bold uppercase transition-colors ${
-                  isCurrentRow ? 'border-zinc-400 bg-white' : 'border-zinc-200 bg-zinc-50'
-                }`}
+                className={`flex aspect-square items-center justify-center rounded-2xl border-2 text-2xl font-bold uppercase transition-colors ${statusClassName}`}
               >
                 {letter}
               </div>
