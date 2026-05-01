@@ -4,21 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 type LetterStatus = 'correct' | 'present' | 'absent';
-type KeyboardLetterStatus = LetterStatus | 'unused';
 type GameStatus = 'loading' | 'ready' | 'won' | 'lost' | 'error';
-
-const keyStatusPriority: Record<LetterStatus, number> = {
-  absent: 1,
-  present: 2,
-  correct: 3,
-};
-
-const keyboardStatusPriority: Record<KeyboardLetterStatus, number> = {
-  unused: 0,
-  absent: 1,
-  present: 2,
-  correct: 3,
-};
 
 const keyboardRows = ['QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
 const specialKeys = ['ENTER', 'DEL'];
@@ -45,7 +31,6 @@ export default function Home() {
   );
   const [currentRowIndex, setCurrentRowIndex] = useState(0);
   const [currentGuess, setCurrentGuess] = useState('');
-  const [keyStatuses, setKeyStatuses] = useState<Record<string, LetterStatus>>({});
   const [targetWord, setTargetWord] = useState('');
   const [gameStatus, setGameStatus] = useState<GameStatus>('ready');
   const [errorMessage, setErrorMessage] = useState('');
@@ -131,22 +116,6 @@ export default function Home() {
     });
   }, []);
 
-  const updateKeyStatus = useCallback((letter: string, nextStatus: LetterStatus) => {
-    setKeyStatuses((previous) => {
-      const currentStatus = previous[letter];
-
-      // CRITICAL: Never downgrade a letter's status. correct > present > absent
-      if (currentStatus && keyStatusPriority[nextStatus] <= keyStatusPriority[currentStatus]) {
-        return previous;
-      }
-
-      return {
-        ...previous,
-        [letter]: nextStatus,
-      };
-    });
-  }, []);
-
   const submitGuess = useCallback(() => {
     if (gameStatus !== 'ready' || targetWord.length !== wordLength || currentGuess.length !== wordLength) {
       return;
@@ -190,12 +159,6 @@ export default function Home() {
       return next;
     });
 
-    // Update keyboard colors - synchronize with grid evaluation
-    for (let index = 0; index < wordLength; index += 1) {
-      const letterStatus = nextCellStatuses[index] ?? 'absent';
-      updateKeyStatus(guess[index], letterStatus);
-    }
-
     if (guess === target) {
       setGameStatus('won');
       return;
@@ -208,7 +171,7 @@ export default function Home() {
 
     setCurrentRowIndex((previous) => previous + 1);
     setCurrentGuess('');
-  }, [currentGuess, currentRowIndex, gameStatus, updateKeyStatus, targetWord]);
+  }, [currentGuess, currentRowIndex, gameStatus, targetWord]);
 
   const handleInput = useCallback(
     (key: string) => {
@@ -265,38 +228,12 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleKeyboard);
   }, [handleInput]);
 
-  const getKeyClassName = (status: LetterStatus | undefined, key: string) => {
-    const baseClassName =
-      'flex h-12 min-w-[2.5rem] items-center justify-center rounded-lg px-2 py-1 text-xs font-bold uppercase transition-all active:scale-95';
-
-    if (status === 'correct') {
-      return `${baseClassName} bg-green-600 text-white shadow-md hover:shadow-lg`;
-    }
-
-    if (status === 'present') {
-      return `${baseClassName} bg-yellow-500 text-white shadow-md hover:shadow-lg`;
-    }
-
-    if (status === 'absent') {
-      return `${baseClassName} bg-gray-500 text-white shadow-md hover:shadow-lg`;
-    }
-
-    // Default state for unused letters
-    return `${baseClassName} bg-gray-200 text-black hover:bg-gray-300 shadow-sm`;
-  };
-
-  const getSpecialKeyClassName = () => {
-    const baseClassName =
-      'flex h-12 min-w-16 items-center justify-center rounded-lg px-2 py-1 text-xs font-bold uppercase transition-all active:scale-95';
-    return `${baseClassName} bg-gray-200 text-black hover:bg-gray-300 shadow-sm`;
-  };
-
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#f8f4ea,#e9e4d8_45%,#ddd6c9)] px-4 py-8 text-zinc-900">
       <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col items-center justify-center gap-8">
         <header className="flex w-full flex-col items-center gap-3 text-center">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-zinc-500">
-            Wordle Clone
+            Wordle Tapi Kata2nya mpruy2
           </p>
           <h1 className="text-4xl font-black tracking-[0.2em] text-zinc-900 sm:text-5xl">
             WORDLE
@@ -340,10 +277,9 @@ export default function Home() {
               <WordleKeyboard
                 keyboardRows={keyboardRows}
                 specialKeys={specialKeys}
-                keyStatuses={keyStatuses}
+                guesses={boardState.slice(0, currentRowIndex).map(row => row.join(''))}
+                targetWord={targetWord}
                 onKeyPress={handleInput}
-                getKeyClassName={getKeyClassName}
-                getSpecialKeyClassName={getSpecialKeyClassName}
                 disabled={isInputLocked}
               />
 
@@ -408,39 +344,70 @@ function WordleGrid({
 function WordleKeyboard({
   keyboardRows,
   specialKeys,
-  keyStatuses,
+  guesses,
+  targetWord,
   onKeyPress,
-  getKeyClassName,
-  getSpecialKeyClassName,
   disabled,
 }: {
   keyboardRows: string[];
   specialKeys: string[];
-  keyStatuses: Record<string, LetterStatus>;
+  guesses: string[];
+  targetWord: string;
   onKeyPress: (key: string) => void;
-  getKeyClassName: (status: LetterStatus | undefined, key: string) => string;
-  getSpecialKeyClassName: () => string;
   disabled: boolean;
 }) {
+  const getStatuses = () => {
+    const statuses: Record<string, 'correct' | 'present' | 'absent'> = {};
+    
+    guesses.forEach((guess) => {
+      for (let i = 0; i < guess.length; i++) {
+        const letter = guess[i].toUpperCase();
+        const targetLetter = targetWord[i]?.toUpperCase();
+        
+        if (letter === targetLetter) {
+          statuses[letter] = 'correct';
+        } else if (targetWord.toUpperCase().includes(letter) && statuses[letter] !== 'correct') {
+          statuses[letter] = 'present';
+        } else if (!targetWord.toUpperCase().includes(letter) && statuses[letter] !== 'correct' && statuses[letter] !== 'present') {
+          statuses[letter] = 'absent';
+        }
+      }
+    });
+    
+    return statuses;
+  };
+
+  const keyStatuses = getStatuses();
+
+  const getKeyClass = (key: string) => {
+    const status = keyStatuses[key];
+    const baseClassName = 'flex h-12 min-w-[2.5rem] items-center justify-center rounded-lg px-2 py-1 text-xs font-bold uppercase transition-all active:scale-95 shadow-sm';
+    
+    if (status === 'correct') return `${baseClassName} bg-green-600 text-white`;
+    if (status === 'present') return `${baseClassName} bg-yellow-500 text-white`;
+    if (status === 'absent') return `${baseClassName} bg-gray-600 text-white`;
+    return `${baseClassName} bg-gray-200 text-black`; // Default
+  };
+
+  const getSpecialKeyClass = () => {
+    return 'flex h-12 min-w-16 items-center justify-center rounded-lg px-2 py-1 text-xs font-bold uppercase transition-all active:scale-95 shadow-sm bg-gray-200 text-black';
+  };
+
   return (
     <div className="mt-8 flex flex-col gap-3">
       {keyboardRows.map((row) => (
         <div key={row} className="flex justify-center gap-2">
-          {row.split('').map((key) => {
-            const status = keyStatuses[key];
-
-            return (
-              <button
-                key={key}
-                type="button"
-                className={getKeyClassName(status, key)}
-                onClick={() => onKeyPress(key)}
-                {...(disabled && { disabled: true })}
-              >
-                {key}
-              </button>
-            );
-          })}
+          {row.split('').map((key) => (
+            <button
+              key={key}
+              type="button"
+              className={getKeyClass(key)}
+              onClick={() => onKeyPress(key)}
+              {...(disabled && { disabled: true })}
+            >
+              {key}
+            </button>
+          ))}
         </div>
       ))}
 
@@ -449,7 +416,7 @@ function WordleKeyboard({
           <button
             key={key}
             type="button"
-            className={getSpecialKeyClassName()}
+            className={getSpecialKeyClass()}
             onClick={() => onKeyPress(key)}
             {...(disabled && { disabled: true })}
           >
