@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type LetterStatus = 'correct' | 'present' | 'absent';
 type GameStatus = 'loading' | 'ready' | 'won' | 'lost' | 'error';
@@ -34,6 +35,7 @@ export default function Home() {
   const [targetWord, setTargetWord] = useState('');
   const [gameStatus, setGameStatus] = useState<GameStatus>('loading');
   const [errorMessage, setErrorMessage] = useState('');
+  const didSendHistoryRef = useRef(false);
 
   useEffect(() => {
     const loadTargetWord = async () => {
@@ -65,6 +67,47 @@ export default function Home() {
 
     loadTargetWord();
   }, []);
+
+  const attemptsUsed = gameStatus === 'won' || gameStatus === 'lost' ? currentRowIndex + 1 : 0;
+  const isInputLocked = gameStatus !== 'ready';
+
+  useEffect(() => {
+    if (gameStatus !== 'won' && gameStatus !== 'lost') {
+      return;
+    }
+
+    if (didSendHistoryRef.current || !targetWord) {
+      return;
+    }
+
+    didSendHistoryRef.current = true;
+
+    const sendHistory = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+        if (!apiUrl) {
+          throw new Error('API URL is not configured');
+        }
+
+        await fetch(`${apiUrl}/api/history`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            targetWord,
+            attempts: attemptsUsed,
+            isWin: gameStatus === 'won',
+          }),
+        });
+      } catch (error) {
+        console.error('Failed to save game history', error);
+      }
+    };
+
+    sendHistory();
+  }, [attemptsUsed, gameStatus, targetWord]);
 
   const updateBoardRow = useCallback((rowIndex: number, guess: string) => {
     setBoardState((previous) => {
@@ -255,10 +298,16 @@ export default function Home() {
               {gameStatus === 'lost' && 'Game over'}
               {gameStatus === 'error' && 'Error'}
             </span>
+            <Link
+              href="/history"
+              className="rounded-full border border-zinc-300 bg-white/70 px-3 py-1 shadow-sm transition-colors hover:bg-zinc-100"
+            >
+              View History
+            </Link>
           </div>
         </header>
 
-        <section className="w-full max-w-lg rounded-3xl border border-zinc-300 bg-white/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.12)] backdrop-blur-sm sm:p-8">
+        <section className="relative w-full max-w-lg rounded-3xl border border-zinc-300 bg-white/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.12)] backdrop-blur-sm sm:p-8">
           {errorMessage ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-center text-sm font-medium text-rose-700">
               {errorMessage}
@@ -280,6 +329,7 @@ export default function Home() {
                         type="button"
                         className={getKeyClassName(key)}
                         onClick={() => handleInput(key)}
+                        disabled={isInputLocked}
                       >
                         {key}
                       </button>
@@ -294,12 +344,21 @@ export default function Home() {
                       type="button"
                       className={getKeyClassName(key)}
                       onClick={() => handleInput(key)}
+                      disabled={isInputLocked}
                     >
                       {key}
                     </button>
                   ))}
                 </div>
               </div>
+
+              {gameStatus === 'won' || gameStatus === 'lost' ? (
+                <GameOverModal
+                  isWin={gameStatus === 'won'}
+                  targetWord={targetWord}
+                  attemptsUsed={attemptsUsed}
+                />
+              ) : null}
             </>
           )}
         </section>
@@ -347,6 +406,39 @@ function WordleGrid({
           })}
         </div>
       ))}
+    </div>
+  );
+}
+
+function GameOverModal({
+  isWin,
+  targetWord,
+  attemptsUsed,
+}: {
+  isWin: boolean;
+  targetWord: string;
+  attemptsUsed: number;
+}) {
+  return (
+    <div className="absolute inset-0 z-20 flex items-center justify-center rounded-3xl bg-zinc-950/45 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-3xl border border-white/40 bg-white p-6 text-center shadow-2xl">
+        <p className={`text-sm font-semibold uppercase tracking-[0.3em] ${isWin ? 'text-emerald-600' : 'text-rose-600'}`}>
+          {isWin ? 'You Win' : 'You Lose'}
+        </p>
+        <h2 className="mt-3 text-3xl font-black tracking-[0.2em] text-zinc-900">
+          {isWin ? 'Solved' : 'Game Over'}
+        </h2>
+        <p className="mt-4 text-sm leading-6 text-zinc-600">
+          The correct word was{' '}
+          <span className="font-bold uppercase tracking-[0.2em] text-zinc-900">
+            {targetWord}
+          </span>
+          .
+        </p>
+        <div className="mt-4 rounded-2xl bg-zinc-100 px-4 py-3 text-sm font-medium text-zinc-700">
+          Attempts used: {attemptsUsed}
+        </div>
+      </div>
     </div>
   );
 }
