@@ -45,35 +45,48 @@ export default function Home() {
   const [showHistory, setShowHistory] = useState(false);
   const didSendHistoryRef = useRef(false);
 
-  useEffect(() => {
-    const loadTargetWord = async () => {
-      try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  const fetchRandomWord = useCallback(async () => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
 
-        if (!apiUrl) {
-          throw new Error('API URL is not configured');
-        }
-
-        const response = await fetch(`${apiUrl}/api/word/random`);
-        const data = (await response.json()) as {
-          success?: boolean;
-          word?: string;
-          message?: string;
-        };
-
-        if (!response.ok || !data.success || !data.word) {
-          throw new Error(data.message || 'Failed to load target word');
-        }
-
-        setTargetWord(data.word.toLowerCase());
-      } catch {
-        setErrorMessage('Failed to load target word. Please refresh the page.');
-        setGameStatus('error');
+      if (!apiUrl) {
+        throw new Error('API URL is not configured');
       }
-    };
 
-    loadTargetWord();
+      const response = await fetch(`${apiUrl}/api/word/random`);
+      const data = (await response.json()) as {
+        success?: boolean;
+        word?: string;
+        message?: string;
+      };
+
+      if (!response.ok || !data.success || !data.word) {
+        throw new Error(data.message || 'Failed to load target word');
+      }
+
+      setTargetWord(data.word.toLowerCase());
+      setGameStatus('ready');
+    } catch {
+      setErrorMessage('Failed to load target word. Please refresh the page.');
+      setGameStatus('error');
+    }
   }, []);
+
+  const resetGame = useCallback(() => {
+    setBoardState(createEmptyBoard());
+    setCellStatuses(createEmptyCellStatuses());
+    setCurrentRowIndex(0);
+    setCurrentGuess('');
+    setTargetWord('');
+    setGameStatus('loading');
+    setErrorMessage('');
+    didSendHistoryRef.current = false;
+    fetchRandomWord();
+  }, [fetchRandomWord]);
+
+  useEffect(() => {
+    fetchRandomWord();
+  }, [fetchRandomWord]);
 
   const attemptsUsed = gameStatus === 'won' || gameStatus === 'lost' ? currentRowIndex + 1 : 0;
   const isInputLocked = gameStatus !== 'ready';
@@ -302,6 +315,7 @@ export default function Home() {
             isWin={gameStatus === 'won'}
             targetWord={targetWord}
             attemptsUsed={attemptsUsed}
+            onPlayAgain={resetGame}
           />
         ) : null}
 
@@ -445,14 +459,16 @@ function GameOverModal({
   isWin,
   targetWord,
   attemptsUsed,
+  onPlayAgain,
 }: {
   isWin: boolean;
   targetWord: string;
   attemptsUsed: number;
+  onPlayAgain: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-20 flex items-center justify-center rounded-3xl bg-zinc-950/45 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-3xl border border-white/40 bg-white p-6 text-center shadow-2xl">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-zinc-950/45 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-3xl border border-white/40 bg-white p-6 text-center shadow-2xl flex flex-col items-center">
         <p className={`text-sm font-semibold uppercase tracking-[0.3em] ${isWin ? 'text-emerald-600' : 'text-rose-600'}`}>
           {isWin ? 'You Win' : 'You Lose'}
         </p>
@@ -466,9 +482,17 @@ function GameOverModal({
           </span>
           .
         </p>
-        <div className="mt-4 rounded-2xl bg-zinc-100 px-4 py-3 text-sm font-medium text-zinc-700">
+        <div className="mt-4 rounded-2xl bg-zinc-100 px-4 py-3 text-sm font-medium text-zinc-700 w-full mb-6">
           Attempts used: {attemptsUsed}
         </div>
+        
+        <button
+          onClick={onPlayAgain}
+          type="button"
+          className="flex w-full items-center justify-center rounded-xl bg-zinc-900 px-4 py-3 text-sm font-bold uppercase tracking-[0.1em] text-white transition-all hover:bg-zinc-800 active:scale-95"
+        >
+          Play Again
+        </button>
       </div>
     </div>
   );
