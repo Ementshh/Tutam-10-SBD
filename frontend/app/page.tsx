@@ -3,6 +3,14 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+type HistoryItem = {
+  id: number;
+  target_word: string;
+  attempts: number;
+  is_win: boolean;
+  created_at: string;
+};
+
 type LetterStatus = 'correct' | 'present' | 'absent';
 type GameStatus = 'loading' | 'ready' | 'won' | 'lost' | 'error';
 
@@ -34,6 +42,7 @@ export default function Home() {
   const [targetWord, setTargetWord] = useState('');
   const [gameStatus, setGameStatus] = useState<GameStatus>('ready');
   const [errorMessage, setErrorMessage] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
   const didSendHistoryRef = useRef(false);
 
   useEffect(() => {
@@ -229,9 +238,9 @@ export default function Home() {
   }, [handleInput]);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#f8f4ea,#e9e4d8_45%,#ddd6c9)] px-4 py-8 text-zinc-900">
-      <div className="mx-auto flex min-h-[calc(100vh-4rem)] w-full max-w-3xl flex-col items-center justify-center gap-8">
-        <header className="flex w-full flex-col items-center gap-3 text-center">
+    <main className="h-screen w-screen overflow-hidden bg-[radial-gradient(circle_at_top,#f8f4ea,#e9e4d8_45%,#ddd6c9)] text-zinc-900 flex flex-col items-center justify-between">
+      <div className="flex h-full w-full max-w-3xl flex-col items-center justify-between">
+        <header className="flex w-full flex-col items-center gap-2 pt-6 pb-2 text-center shrink-0">
           <p className="text-xs font-semibold uppercase tracking-[0.35em] text-zinc-500">
             Wordle Tapi Kata2nya mpruy2
           </p>
@@ -252,47 +261,51 @@ export default function Home() {
               {gameStatus === 'lost' && 'Game over'}
               {gameStatus === 'error' && 'Error'}
             </span>
-            <Link
-              href="/history"
+            <button
+              onClick={() => setShowHistory(true)}
               className="rounded-full border border-zinc-300 bg-white/70 px-3 py-1 shadow-sm transition-colors hover:bg-zinc-100"
             >
               View History
-            </Link>
+            </button>
           </div>
         </header>
 
-        <section className="relative w-full max-w-lg rounded-3xl border border-zinc-300 bg-white/80 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.12)] backdrop-blur-sm sm:p-8">
+        <section className="flex w-full flex-grow items-center justify-center min-h-0 overflow-hidden">
           {errorMessage ? (
             <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-center text-sm font-medium text-rose-700">
               {errorMessage}
             </div>
           ) : (
-            <>
-              <WordleGrid
-                boardState={boardState}
-                cellStatuses={cellStatuses}
-                currentRowIndex={currentRowIndex}
-              />
-
-              <WordleKeyboard
-                keyboardRows={keyboardRows}
-                specialKeys={specialKeys}
-                guesses={boardState.slice(0, currentRowIndex).map(row => row.join(''))}
-                targetWord={targetWord}
-                onKeyPress={handleInput}
-                disabled={isInputLocked}
-              />
-
-              {gameStatus === 'won' || gameStatus === 'lost' ? (
-                <GameOverModal
-                  isWin={gameStatus === 'won'}
-                  targetWord={targetWord}
-                  attemptsUsed={attemptsUsed}
-                />
-              ) : null}
-            </>
+            <WordleGrid
+              boardState={boardState}
+              cellStatuses={cellStatuses}
+              currentRowIndex={currentRowIndex}
+            />
           )}
         </section>
+
+        {!errorMessage && (
+          <section className="w-full max-w-3xl pb-4">
+            <WordleKeyboard
+              keyboardRows={keyboardRows}
+              specialKeys={specialKeys}
+              guesses={boardState.slice(0, currentRowIndex).map(row => row.join(''))}
+              targetWord={targetWord}
+              onKeyPress={handleInput}
+              disabled={isInputLocked}
+            />
+          </section>
+        )}
+
+        {gameStatus === 'won' || gameStatus === 'lost' ? (
+          <GameOverModal
+            isWin={gameStatus === 'won'}
+            targetWord={targetWord}
+            attemptsUsed={attemptsUsed}
+          />
+        ) : null}
+
+        {showHistory && <HistoryModal onClose={() => setShowHistory(false)} />}
       </div>
     </main>
   );
@@ -308,28 +321,28 @@ function WordleGrid({
   currentRowIndex: number;
 }) {
   return (
-    <div className="grid gap-3">
+    <div className="grid grid-rows-6 gap-2 w-full max-w-[350px] mx-auto">
       {boardState.map((row, rowIndex) => (
-        <div key={rowIndex} className="grid grid-cols-5 gap-3">
+        <div key={rowIndex} className="grid grid-cols-5 gap-2">
           {row.map((letter, columnIndex) => {
             const isCurrentRow = rowIndex === currentRowIndex;
             const status = cellStatuses[rowIndex][columnIndex];
 
             const statusClassName =
               status === 'correct'
-                ? 'border-emerald-600 bg-emerald-600 text-white'
+                ? 'border-green-600 bg-green-600 text-white'
                 : status === 'present'
-                  ? 'border-amber-500 bg-amber-500 text-white'
+                  ? 'border-yellow-500 bg-yellow-500 text-white'
                   : status === 'absent'
-                    ? 'border-zinc-500 bg-zinc-500 text-white'
-                    : isCurrentRow
-                      ? 'border-zinc-400 bg-white'
-                      : 'border-zinc-200 bg-zinc-50';
+                    ? 'border-gray-500 bg-gray-500 text-white'
+                    : isCurrentRow && letter
+                      ? 'border-zinc-400 bg-white text-zinc-900 shadow-sm scale-[1.02]'
+                      : 'border-zinc-300 bg-white/50 text-zinc-900';
 
             return (
               <div
                 key={`${rowIndex}-${columnIndex}`}
-                className={`flex aspect-square items-center justify-center rounded-2xl border-2 text-2xl font-bold uppercase transition-colors ${statusClassName}`}
+                className={`flex w-full aspect-square max-w-[4rem] max-h-[4rem] mx-auto items-center justify-center rounded-xl border-2 text-3xl font-bold leading-none uppercase transition-all duration-200 ${statusClassName}`}
               >
                 {letter}
               </div>
@@ -455,6 +468,132 @@ function GameOverModal({
         </p>
         <div className="mt-4 rounded-2xl bg-zinc-100 px-4 py-3 text-sm font-medium text-zinc-700">
           Attempts used: {attemptsUsed}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HistoryModal({ onClose }: { onClose: () => void }) {
+  const [items, setItems] = useState<HistoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+
+  const loadHistory = useCallback(async () => {
+    try {
+      if (!apiUrl) throw new Error('API URL is not configured');
+      setIsLoading(true);
+      setErrorMessage('');
+
+      const response = await fetch(`${apiUrl}/api/history`);
+      const data = (await response.json()) as { success?: boolean; data?: HistoryItem[]; message?: string };
+
+      if (!response.ok || !data.success || !Array.isArray(data.data)) {
+        throw new Error(data.message || 'Failed to load history');
+      }
+
+      setItems(data.data);
+    } catch {
+      setErrorMessage('Failed to load history records.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [apiUrl]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
+
+  const handleDelete = useCallback(
+    async (id: number) => {
+      try {
+        if (!apiUrl) throw new Error('API URL is not configured');
+        const response = await fetch(`${apiUrl}/api/history?id=${id}`, { method: 'DELETE' });
+        const data = (await response.json()) as { success?: boolean; message?: string };
+
+        if (!response.ok || !data.success) {
+          throw new Error(data.message || 'Failed to delete record');
+        }
+        setItems((prev) => prev.filter((item) => item.id !== id));
+      } catch {
+        setErrorMessage('Failed to delete the selected history record.');
+      }
+    },
+    [apiUrl]
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 p-4 backdrop-blur-sm">
+      <div className="relative flex h-full max-h-[80vh] w-full max-w-2xl flex-col rounded-3xl border border-white/20 bg-white shadow-2xl">
+        <header className="flex items-center justify-between border-b border-zinc-200 p-6 shrink-0">
+          <div>
+            <h2 className="text-2xl font-black tracking-[0.1em] text-zinc-900">HISTORY</h2>
+            <p className="mt-1 text-xs text-zinc-500 font-semibold uppercase tracking-[0.15em]">
+              Total games: {items.length}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-zinc-600 transition-colors hover:bg-zinc-200 hover:text-zinc-900"
+          >
+            ✕
+          </button>
+        </header>
+
+        <div className="flex-grow overflow-y-auto p-6">
+          {errorMessage ? (
+            <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+              {errorMessage}
+            </div>
+          ) : isLoading ? (
+            <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+              Loading history...
+            </div>
+          ) : items.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+              No game history found yet.
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {items.map((item) => {
+                const date = new Date(item.created_at).toLocaleString('en-US', {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                });
+                return (
+                  <div
+                    key={item.id}
+                    className="flex flex-col gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div>
+                      <span className="font-bold uppercase tracking-[0.2em] text-zinc-900">
+                        {item.target_word}
+                      </span>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {item.attempts} attempts • {date}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.1em] ${
+                          item.is_win ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+                        }`}
+                      >
+                        {item.is_win ? 'Win' : 'Lose'}
+                      </span>
+                      <button
+                        onClick={() => handleDelete(item.id)}
+                        className="rounded-full border border-rose-200 bg-white px-3 py-1 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </div>
